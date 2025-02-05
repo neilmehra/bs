@@ -1,0 +1,30 @@
+# Build directories
+/build/
+/bin/
+.cache/
+
+# External dependencies (e.g., Google Test)
+external/googletest/build/
+_deps/
+
+# Temporary files and logs
+*.log
+*.tmp
+*.swp
+*.swo
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+CTestTestfile.cmake
+
+# Compiled object files and binaries
+*.o
+*.obj
+*.so
+*.a
+*.out
+*.exe
+*.dll
