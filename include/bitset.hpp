@@ -12,7 +12,6 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 
 namespace bs {
 
@@ -78,29 +77,58 @@ public:
     }
   }
 
+  template <class UnaryOp> bitset& apply_op(UnaryOp f) {
+    std::for_each(execution_policy, data.begin(), data.end(), f);
+    return *this;
+  }
+
+  template <class UnaryOp>
+  bitset& apply_op(backing_t::iterator begin, backing_t::iterator end,
+                   UnaryOp f) {
+    std::for_each(execution_policy, begin, end, f);
+    return *this;
+  }
+
+  template <class BinaryOp> bitset& apply_zip(bitset& rhs, BinaryOp f) {
+    auto z = std::views::zip(data, rhs.data);
+    std::for_each(execution_policy, z.begin(), z.end(), f);
+    return *this;
+  }
+
+  template <class BinaryOp>
+  bitset& apply_zip(bitset& rhs, backing_t::iterator begin,
+                    backing_t::iterator end, BinaryOp f) {
+    auto beg_dist = std::distance(data.begin(), begin);
+    auto end_dist = std::distance(data.begin(), end);
+    auto z = std::views::zip(data, rhs.data);
+    std::for_each(execution_policy, z.begin() + beg_dist, z.begin() + end_dist,
+                  f);
+    return *this;
+  }
+
   // 20.9.2.2, bitset operations
-  bitset<N>& operator&=(const bitset<N>& rhs) noexcept {
-    for (std::size_t i = 0; i < num_blocks; i++) {
-      data[i] &= rhs.data[i];
-    }
-    return *this;
+  bitset& operator&=(const bitset& rhs) noexcept {
+    return apply_zip(rhs, [](auto& v) {
+      auto& [lhs, rhs] = v;
+      lhs &= rhs;
+    });
   };
 
-  bitset<N>& operator|=(const bitset<N>& rhs) noexcept {
-    for (std::size_t i = 0; i < num_blocks; i++) {
-      data[i] |= rhs.data[i];
-    }
-    return *this;
+  bitset& operator|=(const bitset& rhs) noexcept {
+    return apply_zip(rhs, [](auto& v) {
+      auto& [lhs, rhs] = v;
+      lhs |= rhs;
+    });
   };
 
-  bitset<N>& operator^=(const bitset<N>& rhs) noexcept {
-    for (std::size_t i = 0; i < num_blocks; i++) {
-      data[i] ^= rhs.data[i];
-    }
-    return *this;
+  bitset& operator^=(const bitset& rhs) noexcept {
+    return apply_zip(rhs, [](auto& v) {
+      auto& [lhs, rhs] = v;
+      lhs ^= rhs;
+    });
   };
 
-  bitset<N>& operator<<=(std::size_t pos) noexcept {
+  bitset& operator<<=(std::size_t pos) noexcept {
     namespace sv = std::ranges::views;
     for (std::size_t i : sv::iota(pos, N) | sv::reverse) {
       set_unchecked(i, (*this)[i - pos]);
@@ -116,7 +144,7 @@ public:
     return *this;
   }
 
-  bitset<N>& operator>>=(std::size_t pos) noexcept {
+  bitset& operator>>=(std::size_t pos) noexcept {
     for (std::size_t i = 0; i + pos < N; i++) {
       set_unchecked(i, (*this)[i + pos]);
     }
@@ -131,28 +159,28 @@ public:
     return *this;
   };
 
-  bitset<N>& set() noexcept { return set_unchecked(); };
+  bitset& set() noexcept { return set_unchecked(); };
 
-  bitset<N>& set(std::size_t pos, bool val = true) {
+  bitset& set(std::size_t pos, bool val = true) {
     if (pos >= N)
       throw std::out_of_range{"Attempted to set bit out of range"};
     return set_unchecked(pos, val);
   }
 
-  bitset<N>& reset() noexcept { return reset_unchecked(); }
+  bitset& reset() noexcept { return reset_unchecked(); }
 
-  bitset<N>& reset(std::size_t pos) { return reset_unchecked(pos); }
+  bitset& reset(std::size_t pos) { return reset_unchecked(pos); }
 
-  bitset<N> operator~() const noexcept { return this->flip(); }
+  bitset operator~() const noexcept { return this->flip(); }
 
-  bitset<N>& flip() noexcept {
+  bitset& flip() noexcept {
     for (std::size_t i = 0; i < num_blocks; i++) {
       data[i] = ~data[i];
     }
     return *this;
   }
 
-  bitset<N>& flip(std::size_t pos) {
+  bitset& flip(std::size_t pos) {
     std::size_t block_idx = pos / block_t_bitsize;
     std::size_t bit = pos - (block_t_bitsize * block_idx);
     data[block_idx] ^= static_cast<block_t>(1) << bit;
@@ -207,12 +235,11 @@ public:
 
   constexpr std::size_t size() const noexcept { return N; }
 
-  bool
-  operator==(const bitset<N, ExecutionPolicy, block_t>& rhs) const noexcept {
-    auto z = std::views::zip(*this, rhs);
-    std::all_of(execution_policy, z.begin(), z.end(), [](const auto& v) {
-      std::tuple<block_t&, block_t&> elem = v;
-      return std::get<0>(elem) == std::get<1>(elem);
+  bool operator==(const bitset& rhs) const noexcept {
+    auto z = std::views::zip(this->data, rhs.data);
+    return std::all_of(execution_policy, z.begin(), z.end(), [](const auto& v) {
+      const auto& [lhs, rhs] = v;
+      return lhs == rhs;
     });
   }
 
@@ -225,7 +252,7 @@ public:
   bool all() const noexcept {
     block_t mask = ~(block_t{0});
     return std::all_of(execution_policy, data.begin(), data.end(),
-                       [](const auto& v) { return v == mask; });
+                       [mask](const auto& v) { return v == mask; });
   }
 
   bool any() const noexcept {
@@ -235,13 +262,13 @@ public:
 
   bool none() const noexcept { return !any(); }
 
-  bitset<N> operator<<(std::size_t pos) const noexcept {
+  bitset operator<<(std::size_t pos) const noexcept {
     auto ret = *this;
     ret <<= pos;
     return ret;
   }
 
-  bitset<N> operator>>(std::size_t pos) const noexcept {
+  bitset operator>>(std::size_t pos) const noexcept {
     auto ret = *this;
     ret >>= pos;
     return ret;
@@ -249,7 +276,7 @@ public:
 
   template <class charT, class traits>
   friend std::basic_istream<charT, traits>&
-  operator>>(std::basic_istream<charT, traits>& is, bitset<N>& x);
+  operator>>(std::basic_istream<charT, traits>& is, bitset& x);
 
 private:
   constexpr static ExecutionPolicy execution_policy{};
@@ -259,15 +286,12 @@ private:
 
   backing_t data{};
 
-  bitset<N, ExecutionPolicy>& set_unchecked() {
+  bitset& set_unchecked() {
     block_t mask = std::numeric_limits<block_t>::max();
-    for (std::size_t i = 0; i < num_blocks; i++) {
-      data[i] |= mask;
-    }
-    return *this;
+    return apply_op([mask](auto& v) { v |= mask; });
   }
 
-  bitset<N>& set_unchecked(std::size_t pos, bool val) {
+  bitset& set_unchecked(std::size_t pos, bool val) {
     if (!val)
       return reset_unchecked(pos);
     std::size_t block_idx = pos / block_t_bitsize;
@@ -276,14 +300,11 @@ private:
     return *this;
   }
 
-  bitset<N>& reset_unchecked() noexcept {
-    for (std::size_t i = 0; i < num_blocks; i++) {
-      data[i] &= 0;
-    }
-    return *this;
+  bitset& reset_unchecked() noexcept {
+    return apply_op([](auto& v) { v &= 0; });
   }
 
-  bitset<N>& reset_unchecked(std::size_t pos) {
+  bitset& reset_unchecked(std::size_t pos) {
     std::size_t block_idx = pos / block_t_bitsize;
     std::size_t bit = pos - (block_t_bitsize * block_idx);
     block_t mask = std::numeric_limits<block_t>::max();
@@ -340,27 +361,28 @@ private:
 };
 
 template <std::size_t N, class ExecutionPolicy, class block_t>
-bitset<N, ExecutionPolicy>
+bitset<N, ExecutionPolicy, block_t>
 operator&(const bitset<N, ExecutionPolicy, block_t>& lhs,
           const bitset<N, ExecutionPolicy, block_t>& rhs) noexcept {
-  bitset<N> res(lhs);
+  bitset<N, ExecutionPolicy, block_t> res(lhs);
   res &= rhs;
   return res;
 }
 
 template <std::size_t N, class ExecutionPolicy, class block_t>
-bitset<N> operator|(const bitset<N, ExecutionPolicy, block_t>& lhs,
-                    const bitset<N, ExecutionPolicy, block_t>& rhs) noexcept {
-  bitset<N> res(lhs);
+bitset<N, ExecutionPolicy, block_t>
+operator|(const bitset<N, ExecutionPolicy, block_t>& lhs,
+          const bitset<N, ExecutionPolicy, block_t>& rhs) noexcept {
+  bitset<N, ExecutionPolicy, block_t> res(lhs);
   res |= rhs;
   return res;
 }
 
 template <std::size_t N, class ExecutionPolicy, class block_t>
-bitset<N, ExecutionPolicy>
+bitset<N, ExecutionPolicy, block_t>
 operator^(const bitset<N, ExecutionPolicy, block_t>& lhs,
           const bitset<N, ExecutionPolicy, block_t>& rhs) noexcept {
-  bitset<N> res(lhs);
+  bitset<N, ExecutionPolicy, block_t> res(lhs);
   res ^= rhs;
   return res;
 };
