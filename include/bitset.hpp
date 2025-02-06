@@ -7,8 +7,6 @@
 #include <execution>
 #include <ios>
 #include <iosfwd>
-#include <limits>
-#include <numeric>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -18,6 +16,7 @@ namespace bs {
 template <class block_t>
 concept C_BitOps = requires(block_t a, block_t b) {
   block_t{0};
+  static_cast<block_t>(1);
   a &= b;
   a |= b;
   a ^= b;
@@ -34,14 +33,13 @@ concept C_Bitset = requires {
   C_BitOps<block_t>;
 };
 
-// bitset w/ potential parallelized/vectorized execution policy
-template <std::size_t N,
-          class ExecutionPolicy = std::execution::parallel_unsequenced_policy,
-          class block_t = std::size_t>
+// Execution Policy-aware bitset
+template <std::size_t N, class ExecutionPolicy, class block_t>
   requires C_Bitset<N, ExecutionPolicy, block_t>
 class bitset {
 public:
   using backing_t = std::array<block_t, N>;
+  using backing_it_t = backing_t::iterator;
 
   class reference;
 
@@ -77,14 +75,19 @@ public:
     }
   }
 
+  backing_it_t begin() noexcept { return data.begin(); }
+  backing_it_t end() noexcept { return data.end(); }
+
+  backing_it_t begin() const noexcept { return data.begin(); }
+  backing_it_t end() const noexcept { return data.end(); }
+
   template <class UnaryOp> bitset& apply_op(UnaryOp f) {
     std::for_each(execution_policy, data.begin(), data.end(), f);
     return *this;
   }
 
   template <class UnaryOp>
-  bitset& apply_op(backing_t::iterator begin, backing_t::iterator end,
-                   UnaryOp f) {
+  bitset& apply_op(backing_it_t begin, backing_it_t end, UnaryOp f) {
     std::for_each(execution_policy, begin, end, f);
     return *this;
   }
@@ -96,8 +99,8 @@ public:
   }
 
   template <class BinaryOp>
-  bitset& apply_zip(bitset& rhs, backing_t::iterator begin,
-                    backing_t::iterator end, BinaryOp f) {
+  bitset& apply_zip(bitset& rhs, backing_it_t begin, backing_it_t end,
+                    BinaryOp f) {
     auto beg_dist = std::distance(data.begin(), begin);
     auto end_dist = std::distance(data.begin(), end);
     auto z = std::views::zip(data, rhs.data);
@@ -133,14 +136,14 @@ public:
     for (std::size_t i : sv::iota(pos, N) | sv::reverse) {
       set_unchecked(i, (*this)[i - pos]);
     }
-    for (std::size_t i = 0; i < pos; i++) {
-      if (i % block_t_bitsize == 0 && i + block_t_bitsize < pos) {
-        data[i / block_t_bitsize] = 0;
-        i += block_t_bitsize - 1;
-      } else {
-        reset_unchecked(i);
-      }
-    }
+
+    std::size_t pos_block_idx = pos / block_t_bitsize;
+    reset(data.begin(), data.begin() + pos_block_idx);
+
+    std::size_t bit_idx = pos - (pos_block_idx * block_t_bitsize);
+    block_t mask = ~((static_cast<block_t>(1) << bit_idx) - 1);
+    data[pos_block_idx] &= mask;
+
     return *this;
   }
 
@@ -148,18 +151,19 @@ public:
     for (std::size_t i = 0; i + pos < N; i++) {
       set_unchecked(i, (*this)[i + pos]);
     }
-    for (std::size_t i = N - pos; i < N; i++) {
-      if (i % block_t_bitsize == 0) {
-        data[i / block_t_bitsize] = 0;
-        i += block_t_bitsize - 1;
-      } else {
-        reset_unchecked(i);
-      }
-    }
+
+    std::size_t pos_block_idx = pos / block_t_bitsize;
+    reset(data.begin() + pos_block_idx + 1, data.end());
+
+    std::size_t bit_idx = pos - (pos_block_idx * block_t_bitsize);
+
+    block_t mask = (static_cast<block_t>(1) << bit_idx) - 1;
+    data[pos_block_idx] &= mask;
+
     return *this;
   };
 
-  bitset& set() noexcept { return set_unchecked(); };
+  bitset& set() noexcept { return set(data.begin(), data.end()); };
 
   bitset& set(std::size_t pos, bool val = true) {
     if (pos >= N)
@@ -167,24 +171,37 @@ public:
     return set_unchecked(pos, val);
   }
 
-  bitset& reset() noexcept { return reset_unchecked(); }
+  bitset& set(backing_it_t begin, backing_it_t end) {
+    block_t mask = ~block_t{0};
+    return this->apply_op(begin, end, [](auto& v) { v = mask; });
+  }
 
-  bitset& reset(std::size_t pos) { return reset_unchecked(pos); }
+  bitset& reset() noexcept { return reset(data.begin(), data.end()); }
+
+  bitset& reset(std::size_t pos) {
+    if (pos >= N) {
+      throw std::out_of_range{"Attempted to reset bit out of range"};
+    }
+    return reset_unchecked(pos);
+  }
+
+  bitset& reset(backing_it_t begin, backing_it_t end) {
+    return apply_op(begin, end, [](auto& v) { v = 0; });
+  }
 
   bitset operator~() const noexcept { return this->flip(); }
 
-  bitset& flip() noexcept {
-    for (std::size_t i = 0; i < num_blocks; i++) {
-      data[i] = ~data[i];
-    }
-    return *this;
-  }
+  bitset& flip() noexcept { return flip(data.begin(), data.end()); }
 
   bitset& flip(std::size_t pos) {
     std::size_t block_idx = pos / block_t_bitsize;
     std::size_t bit = pos - (block_t_bitsize * block_idx);
     data[block_idx] ^= static_cast<block_t>(1) << bit;
     return *this;
+  }
+
+  bitset& flip(backing_it_t first, backing_it_t last) {
+    return apply_op(first, last, [](auto& v) { v = ~v; });
   }
 
   // element access
@@ -286,11 +303,7 @@ private:
 
   backing_t data{};
 
-  bitset& set_unchecked() {
-    block_t mask = std::numeric_limits<block_t>::max();
-    return apply_op([mask](auto& v) { v |= mask; });
-  }
-
+  // need a non-noexcept impl to reuse in bitshift operators
   bitset& set_unchecked(std::size_t pos, bool val) {
     if (!val)
       return reset_unchecked(pos);
@@ -300,19 +313,13 @@ private:
     return *this;
   }
 
-  bitset& reset_unchecked() noexcept {
-    return apply_op([](auto& v) { v &= 0; });
-  }
-
   bitset& reset_unchecked(std::size_t pos) {
     std::size_t block_idx = pos / block_t_bitsize;
     std::size_t bit = pos - (block_t_bitsize * block_idx);
-    block_t mask = std::numeric_limits<block_t>::max();
+    block_t mask = ~block_t{0};
     data[block_idx] &= mask ^ (static_cast<block_t>(1) << bit);
     return *this;
   }
-
-  // need a non-noexcept impl to reuse in bitshift operators
 };
 
 template <std::size_t N, class ExecutionPolicy, class block_t>
@@ -330,7 +337,7 @@ public:
     if (x) {
       block |= bit;
     } else {
-      block &= std::numeric_limits<block_t>::max() ^ bit;
+      block &= (~block_t{0}) ^ bit;
     }
     return *this;
   };
