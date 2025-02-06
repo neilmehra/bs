@@ -1,3 +1,3 @@
-# dbitset
+# bs
 
-Dynamic bitset
+Fast bitsets
