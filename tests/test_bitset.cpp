@@ -128,7 +128,9 @@ TEST(BitsetTest, ShiftLeft) {
 
 TEST(BitsetTest, ShiftRight) {
   bs::bitset<8> b(0b10110000ULL);
+  std::cout << b.to_string() << std::endl;;
   b >>= 3;
+  std::cout << b.to_string() << std::endl;;
   ASSERT_EQ(b[0], 0);
   ASSERT_EQ(b[1], 1);
   ASSERT_EQ(b[2], 1);

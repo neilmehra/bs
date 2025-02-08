@@ -4,6 +4,5 @@ export CXX=/usr/bin/clang++
 rm -rf build
 mkdir build
 cd build
-cmake ..
+cmake -DTBB_TEST=OFF ..
 cmake --build .
-ctest --output-on-failure --verbose

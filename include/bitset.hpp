@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <execution>
 #include <ios>
 #include <iosfwd>
+#include <iostream>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -15,26 +17,24 @@ namespace bs {
 
 template <class block_t>
 concept C_BitOps = requires(block_t a, block_t b) {
-  block_t{0};
-  static_cast<block_t>(1);
-  a &= b;
-  a |= b;
-  a ^= b;
-  a | b;
-  a & b;
-  a ^ b;
-  ~a;
+  { block_t{0} } -> std::same_as<block_t>;
+  { static_cast<block_t>(1) } -> std::same_as<block_t>;
+  { a &= b } -> std::same_as<block_t&>;
+  { a |= b } -> std::same_as<block_t&>;
+  { a ^= b } -> std::same_as<block_t&>;
+  { a | b } -> std::same_as<block_t>;
+  { a& b } -> std::same_as<block_t>;
+  { a ^ b } -> std::same_as<block_t>;
+  { ~a } -> std::same_as<block_t>;
 };
 
 template <std::size_t N, class ExecutionPolicy, class block_t>
-concept C_Bitset = requires {
-  N > 0;
-  std::is_execution_policy_v<ExecutionPolicy>;
-  C_BitOps<block_t>;
-};
+concept C_Bitset =
+    (N > 0) && std::is_execution_policy_v<ExecutionPolicy> && C_BitOps<block_t>;
 
-// Execution Policy-aware bitset
-template <std::size_t N, class ExecutionPolicy, class block_t>
+template <std::size_t N,
+          class ExecutionPolicy = std::execution::sequenced_policy,
+          class block_t = std::size_t>
   requires C_Bitset<N, ExecutionPolicy, block_t>
 class bitset {
 public:
@@ -111,21 +111,21 @@ public:
 
   // 20.9.2.2, bitset operations
   bitset& operator&=(const bitset& rhs) noexcept {
-    return apply_zip(rhs, [](auto& v) {
+    return apply_zip(const_cast<bitset&>(rhs), [](const auto& v) {
       auto& [lhs, rhs] = v;
       lhs &= rhs;
     });
   };
 
   bitset& operator|=(const bitset& rhs) noexcept {
-    return apply_zip(rhs, [](auto& v) {
+    return apply_zip(const_cast<bitset&>(rhs), [](const auto& v) {
       auto& [lhs, rhs] = v;
       lhs |= rhs;
     });
   };
 
   bitset& operator^=(const bitset& rhs) noexcept {
-    return apply_zip(rhs, [](auto& v) {
+    return apply_zip(const_cast<bitset&>(rhs), [](const auto& v) {
       auto& [lhs, rhs] = v;
       lhs ^= rhs;
     });
@@ -157,7 +157,9 @@ public:
 
     std::size_t bit_idx = pos - (pos_block_idx * block_t_bitsize);
 
-    block_t mask = (static_cast<block_t>(1) << bit_idx) - 1;
+    block_t mask =
+        (static_cast<block_t>(1) << (std::min(block_t_bitsize, N) - bit_idx)) -
+        1;
     data[pos_block_idx] &= mask;
 
     return *this;
@@ -173,7 +175,7 @@ public:
 
   bitset& set(backing_it_t begin, backing_it_t end) {
     block_t mask = ~block_t{0};
-    return this->apply_op(begin, end, [](auto& v) { v = mask; });
+    return this->apply_op(begin, end, [mask](auto& v) { v = mask; });
   }
 
   bitset& reset() noexcept { return reset(data.begin(), data.end()); }
@@ -245,8 +247,8 @@ public:
 
   std::size_t count() const noexcept {
     return std::reduce(execution_policy, data.begin(), data.end(),
-                       std::size_t{0}, [](const auto& lhs, const auto& rhs) {
-                         return std::popcount(lhs) + std::popcount(rhs);
+                       std::size_t{0}, [](const auto& accum, const auto& v) {
+                         return accum + std::popcount(v);
                        });
   }
 

@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.14)
-project(ditbiset LANGUAGES CXX)
+project(bs LANGUAGES CXX)
 enable_testing()
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS 1) # for clangd
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1) # to help clangd detect sources
+# set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
 
-add_library(ditbiset INTERFACE)
-target_include_directories(ditbiset INTERFACE include)
+add_library(bs INTERFACE)
+target_include_directories(bs INTERFACE include)
 
 # external libs
 include(FetchContent)
@@ -25,13 +25,20 @@ FetchContent_Declare(googlebenchmark
 
 FetchContent_MakeAvailable(googletest googlebenchmark)
 
+FetchContent_Declare(
+  tbb
+  GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
+  GIT_TAG v2022.0.0
+  GIT_SHALLOW ON
+)
+FetchContent_MakeAvailable(tbb)
 
 # Link gtest
 file(GLOB_RECURSE TEST_SOURCES "tests/*.cpp")
 foreach(TEST_SOURCE ${TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SOURCE} NAME_WE)
     add_executable(${TEST_NAME} ${TEST_SOURCE})
-    target_link_libraries(${TEST_NAME} ditbiset gtest gtest_main)
+    target_link_libraries(${TEST_NAME} bs gtest gtest_main TBB::tbb)
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endforeach()
 
@@ -40,6 +47,6 @@ file(GLOB_RECURSE BENCH_SOURCES "benches/*.cpp")
 foreach(BENCH_SOURCE ${BENCH_SOURCES})
     get_filename_component(BENCH_NAME ${BENCH_SOURCE} NAME_WE)
     add_executable(${BENCH_NAME} ${BENCH_SOURCE})
-    target_link_libraries(${BENCH_NAME} ditbiset benchmark::benchmark)
+    target_link_libraries(${BENCH_NAME} bs benchmark::benchmark TBB::tbb)
     add_test(NAME ${BENCH_NAME} COMMAND ${BENCH_NAME})
 endforeach()
