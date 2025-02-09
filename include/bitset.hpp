@@ -52,7 +52,6 @@ public:
 
   template <class charT = char, class traits = std::char_traits<charT>,
             class Allocator = std::allocator<charT>>
-
   explicit bitset(
       const std::basic_string<charT, traits, Allocator>& str,
       typename std::basic_string<charT, traits, Allocator>::size_type pos = 0,
@@ -252,7 +251,10 @@ public:
                        });
   }
 
-  constexpr std::size_t size() const noexcept { return N; }
+  std::size_t size() const noexcept { return N; }
+  std::size_t bit_size() const noexcept {
+    return data.size() * block_t_bitsize;
+  }
 
   bool operator==(const bitset& rhs) const noexcept {
     auto z = std::views::zip(this->data, rhs.data);
