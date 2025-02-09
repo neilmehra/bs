@@ -41,9 +41,12 @@ public:
 
   class reference;
 
-  dbitset() noexcept;
+  dbitset() noexcept {}
 
-  dbitset(unsigned long long val);
+  dbitset(unsigned long long val) {
+    data.reserve(1);
+    data.push_back(val);
+  }
 
   template <class charT = char, class traits = std::char_traits<charT>,
             class Allocator = std::allocator<charT>>
@@ -71,70 +74,115 @@ public:
   dbitset& apply_zip(dbitset& rhs, backing_it_t begin, backing_it_t end,
                      BinaryOp f);
 
-  // 20.9.2.2, dbitset operations
-  dbitset& operator&=(const dbitset& rhs) noexcept;
+  dbitset& operator&=(const dbitset& rhs) noexcept {
+    return apply_zip(const_cast<dbitset&>(rhs), [](const auto& v) {
+      auto& [lhs, rhs] = v;
+      lhs &= rhs;
+    });
+  }
 
-  dbitset& operator|=(const dbitset& rhs) noexcept;
+  dbitset& operator|=(const dbitset& rhs) noexcept {
+    return apply_zip(const_cast<dbitset&>(rhs), [](const auto& v) {
+      auto& [lhs, rhs] = v;
+      lhs |= rhs;
+    });
+  }
 
-  dbitset& operator^=(const dbitset& rhs) noexcept;
+  dbitset& operator^=(const dbitset& rhs) noexcept {
+    return apply_zip(const_cast<dbitset&>(rhs), [](const auto& v) {
+      auto& [lhs, rhs] = v;
+      lhs ^= rhs;
+    });
+  }
 
   dbitset& operator<<=(std::size_t pos) noexcept;
 
   dbitset& operator>>=(std::size_t pos) noexcept;
 
-  dbitset& set() noexcept;
+  dbitset operator~() const noexcept { return this->flip(); }
 
-  dbitset& set(std::size_t pos, bool val = true);
+  constexpr bool operator[](std::size_t pos) const;
 
-  dbitset& set(backing_it_t begin, backing_it_t end);
+  reference operator[](std::size_t pos);
 
-  dbitset& reset() noexcept;
+  bool operator==(const dbitset& rhs) const noexcept;
 
-  dbitset& reset(std::size_t pos);
+  dbitset operator<<(std::size_t pos) const noexcept {
+    auto ret = *this;
+    return ret <<= pos;
+  }
 
-  dbitset& reset(backing_it_t begin, backing_it_t end);
+  dbitset operator>>(std::size_t pos) const noexcept {
+    auto ret = *this;
+    return ret >>= pos;
+  }
 
-  dbitset operator~() const noexcept;
+  dbitset& set() noexcept { return set(data.begin(), data.end()); }
 
-  dbitset& flip() noexcept;
+  dbitset& set(std::size_t pos, bool val = true) {
+    if (pos >= size())
+      throw std::out_of_range{"Attempted to set bit out of range"};
+    return set_unchecked(pos, val);
+  }
+
+  dbitset& set(backing_it_t begin, backing_it_t end) {
+    block_t mask = ~block_t{0};
+    return this->apply_op(begin, end, [mask](auto& v) { v = mask; });
+  }
+
+  dbitset& reset() noexcept { return reset(data.begin(), data.end()); }
+
+  dbitset& reset(std::size_t pos) {
+
+    if (pos >= size()) {
+      throw std::out_of_range{"Attempted to reset bit out of range"};
+    }
+    return reset_unchecked(pos);
+  }
+
+  dbitset& reset(backing_it_t begin, backing_it_t end) {
+
+    return apply_op(begin, end, [](auto& v) { v = 0; });
+  }
+
+  dbitset& flip() noexcept { return flip(data.begin(), data.end()); }
 
   dbitset& flip(std::size_t pos);
 
-  dbitset& flip(backing_it_t first, backing_it_t last);
+  dbitset& flip(backing_it_t first, backing_it_t last) {
+    return apply_op(first, last, [](auto& v) { v = ~v; });
+  }
 
-  // element access
-  constexpr bool operator[](std::size_t pos) const;
+  // data access
 
-  // for b[i];
-  reference operator[](std::size_t pos);
+  std::size_t count() const noexcept;
 
-  // for b[i];
+  std::size_t size() const noexcept { return size_; }
+
+  bool test(std::size_t pos) const {
+
+    if (pos >= size())
+      throw std::out_of_range{"Attempted to test bit out of range"};
+    return (*this)[pos];
+  }
+
+  bool all() const noexcept;
+
+  bool any() const noexcept {
+    return std::any_of(execution_policy, data.begin(), data.end(),
+                       [](const auto& v) { return v != 0; });
+  }
+
+  bool none() const noexcept { return !any(); }
+
   unsigned long to_ulong() const;
 
-  unsigned long long to_ullong() const;
+  unsigned long long to_ullong() const { return to_ulong(); }
 
   template <class charT = char, class traits = std::char_traits<charT>,
             class Allocator = std::allocator<charT>>
   std::basic_string<charT, traits, Allocator>
   to_string(charT zero = charT('0'), charT one = charT('1')) const;
-
-  std::size_t count() const noexcept;
-
-  std::size_t size() const noexcept;
-
-  bool operator==(const dbitset& rhs) const noexcept;
-
-  bool test(std::size_t pos) const;
-
-  bool all() const noexcept;
-
-  bool any() const noexcept;
-
-  bool none() const noexcept;
-
-  dbitset operator<<(std::size_t pos) const noexcept;
-
-  dbitset operator>>(std::size_t pos) const noexcept;
 
   template <class charT, class traits>
   friend std::basic_istream<charT, traits>&
@@ -142,7 +190,11 @@ public:
 
   // dynamic methods here
 
-  void push_back(bool b);
+  void push_back(bool b) {
+
+    reserve();
+    set(size_++, b);
+  }
 
 private:
   constexpr static ExecutionPolicy execution_policy{};
@@ -151,24 +203,17 @@ private:
   std::size_t size_; // for num bits
   backing_t data{};
 
-  void reserve();
+  void reserve() {
+    if ((size_ + 1) % block_t_bitsize == 0) {
+      data.push_back(0);
+    }
+  }
 
   // need a non-noexcept impl to reuse in bitshift operators
   dbitset& set_unchecked(std::size_t pos, bool val);
 
   dbitset& reset_unchecked(std::size_t pos);
 };
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>::dbitset() noexcept {}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>::dbitset(unsigned long long val) {
-  data.reserve(1);
-  data.push_back(val);
-}
 
 template <class ExecutionPolicy, class block_t>
   requires C_Bitset<ExecutionPolicy, block_t>
@@ -240,37 +285,6 @@ dbitset<ExecutionPolicy, block_t>::apply_zip(dbitset& rhs, backing_it_t begin,
   return *this;
 }
 
-// 20.9.2.2, dbitset operations
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::operator&=(const dbitset& rhs) noexcept {
-  return apply_zip(const_cast<dbitset&>(rhs), [](const auto& v) {
-    auto& [lhs, rhs] = v;
-    lhs &= rhs;
-  });
-};
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::operator|=(const dbitset& rhs) noexcept {
-  return apply_zip(const_cast<dbitset&>(rhs), [](const auto& v) {
-    auto& [lhs, rhs] = v;
-    lhs |= rhs;
-  });
-};
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::operator^=(const dbitset& rhs) noexcept {
-  return apply_zip(const_cast<dbitset&>(rhs), [](const auto& v) {
-    auto& [lhs, rhs] = v;
-    lhs ^= rhs;
-  });
-};
-
 template <class ExecutionPolicy, class block_t>
   requires C_Bitset<ExecutionPolicy, block_t>
 dbitset<ExecutionPolicy, block_t>&
@@ -314,80 +328,11 @@ dbitset<ExecutionPolicy, block_t>::operator>>=(std::size_t pos) noexcept {
 template <class ExecutionPolicy, class block_t>
   requires C_Bitset<ExecutionPolicy, block_t>
 dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::set() noexcept {
-  return set(data.begin(), data.end());
-};
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::set(std::size_t pos, bool val) {
-  if (pos >= size())
-    throw std::out_of_range{"Attempted to set bit out of range"};
-  return set_unchecked(pos, val);
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::set(backing_it_t begin, backing_it_t end) {
-  block_t mask = ~block_t{0};
-  return this->apply_op(begin, end, [mask](auto& v) { v = mask; });
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::reset() noexcept {
-  return reset(data.begin(), data.end());
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::reset(std::size_t pos) {
-  if (pos >= size()) {
-    throw std::out_of_range{"Attempted to reset bit out of range"};
-  }
-  return reset_unchecked(pos);
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::reset(backing_it_t begin, backing_it_t end) {
-  return apply_op(begin, end, [](auto& v) { v = 0; });
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>::operator~() const noexcept {
-  return this->flip();
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::flip() noexcept {
-  return flip(data.begin(), data.end());
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
 dbitset<ExecutionPolicy, block_t>::flip(std::size_t pos) {
   std::size_t block_idx = pos / block_t_bitsize;
   std::size_t bit = pos - (block_t_bitsize * block_idx);
   data[block_idx] ^= static_cast<block_t>(1) << bit;
   return *this;
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>&
-dbitset<ExecutionPolicy, block_t>::flip(backing_it_t first, backing_it_t last) {
-  return apply_op(first, last, [](auto& v) { v = ~v; });
 }
 
 // element access
@@ -424,12 +369,6 @@ unsigned long dbitset<ExecutionPolicy, block_t>::to_ulong() const {
 
 template <class ExecutionPolicy, class block_t>
   requires C_Bitset<ExecutionPolicy, block_t>
-unsigned long long dbitset<ExecutionPolicy, block_t>::to_ullong() const {
-  return to_ulong();
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
 template <class charT, class traits, class Allocator>
 std::basic_string<charT, traits, Allocator>
 dbitset<ExecutionPolicy, block_t>::to_string(charT zero, charT one) const {
@@ -453,12 +392,6 @@ std::size_t dbitset<ExecutionPolicy, block_t>::count() const noexcept {
 
 template <class ExecutionPolicy, class block_t>
   requires C_Bitset<ExecutionPolicy, block_t>
-std::size_t dbitset<ExecutionPolicy, block_t>::size() const noexcept {
-  return size_;
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
 bool dbitset<ExecutionPolicy, block_t>::operator==(
     const dbitset& rhs) const noexcept {
   auto z = std::views::zip(this->data, rhs.data);
@@ -470,69 +403,12 @@ bool dbitset<ExecutionPolicy, block_t>::operator==(
 
 template <class ExecutionPolicy, class block_t>
   requires C_Bitset<ExecutionPolicy, block_t>
-bool dbitset<ExecutionPolicy, block_t>::test(std::size_t pos) const {
-  if (pos >= size())
-    throw std::out_of_range{"Attempted to test bit out of range"};
-  return (*this)[pos];
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
 bool dbitset<ExecutionPolicy, block_t>::all() const noexcept {
   block_t mask = ~(block_t{0});
   return std::all_of(execution_policy, data.begin(), data.end(),
                      [mask](const auto& v) { return v == mask; });
 }
 
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-bool dbitset<ExecutionPolicy, block_t>::any() const noexcept {
-  return std::any_of(execution_policy, data.begin(), data.end(),
-                     [](const auto& v) { return v != 0; });
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-bool dbitset<ExecutionPolicy, block_t>::none() const noexcept {
-  return !any();
-}
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>::operator<<(std::size_t pos) const noexcept {
-  auto ret = *this;
-  ret <<= pos;
-  return ret;
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>
-dbitset<ExecutionPolicy, block_t>::operator>>(std::size_t pos) const noexcept {
-  auto ret = *this;
-  ret >>= pos;
-  return ret;
-}
-
-// dynamic methods here
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-void dbitset<ExecutionPolicy, block_t>::dbitset<ExecutionPolicy,
-                                                block_t>::push_back(bool b) {
-  reserve();
-  set(size_++, b);
-}
-
-template <class ExecutionPolicy, class block_t>
-  requires C_Bitset<ExecutionPolicy, block_t>
-void dbitset<ExecutionPolicy, block_t>::reserve() {
-  if ((size_ + 1) % block_t_bitsize == 0) {
-    data.push_back(0);
-  }
-}
-
-// need a non-noexcept impl to reuse in bitshift operators
 template <class ExecutionPolicy, class block_t>
   requires C_Bitset<ExecutionPolicy, block_t>
 dbitset<ExecutionPolicy, block_t>&
